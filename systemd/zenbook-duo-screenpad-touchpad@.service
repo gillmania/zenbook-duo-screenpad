@@ -1,0 +1,40 @@
+[Unit]
+Description=ScreenPad Plus touchpad for uid %i
+Documentation=https://github.com/gillmania/zenbook-duo-screenpad
+
+[Service]
+Type=notify
+ExecStart=/usr/local/bin/zenbook-duo-screenpad-touchpad %i
+# A hang while the touchscreen is grabbed leaves it dead to touch, so a missed
+# report from the main loop restarts the service, which lets go of it.
+WatchdogSec=10
+Restart=always
+RestartSec=1
+
+# Root only for /dev/uinput and the touchscreen; nothing else is reachable.
+RuntimeDirectory=zenbook-duo-screenpad-touchpad-%i
+RuntimeDirectoryMode=0755
+DevicePolicy=closed
+DeviceAllow=/dev/uinput rw
+DeviceAllow=char-input r
+CapabilityBoundingSet=CAP_CHOWN
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateNetwork=yes
+RestrictAddressFamilies=AF_UNIX
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+
+[Install]
+WantedBy=multi-user.target

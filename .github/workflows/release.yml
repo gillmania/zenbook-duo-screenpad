@@ -1,0 +1,59 @@
+# Build the Arch package for a version tag and attach it to the release.
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# The tag must match pkgver in packaging/PKGBUILD. The package is built in a
+# clean Arch container from the tagged commit, and published with its SHA-256.
+
+name: Release package
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container: archlinux:base-devel
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install build tools
+        run: pacman -Syu --noconfirm --needed cargo git github-cli
+
+      - name: Check the tag against the PKGBUILD
+        run: |
+          version=$(sed -n 's/^pkgver=//p' packaging/PKGBUILD)
+          [[ "v$version" == "$GITHUB_REF_NAME" ]] || { echo "tag $GITHUB_REF_NAME, PKGBUILD $version"; exit 1; }
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: |
+          git config --global --add safe.directory "$PWD"
+          # The source tarball the PKGBUILD expects, made from this commit.
+          git archive --format=tar.gz --prefix="zenbook-duo-screenpad-$VERSION/" \
+            -o "packaging/zenbook-duo-screenpad-$VERSION.tar.gz" HEAD
+          # makepkg will not run as root.
+          useradd -m builder
+          chown -R builder packaging
+          # Runtime dependencies (asusctl, hyprland) are not needed to build.
+          sudo -u builder bash -c 'cd packaging && makepkg --nodeps --noconfirm'
+          cd packaging && sha256sum ./*.pkg.tar.zst > SHA256SUMS && cat SHA256SUMS
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --title "Zenbook Duo 14 ScreenPad $VERSION" --notes "Install with:
+
+          \`\`\`
+          sudo pacman -U https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/zenbook-duo-screenpad-$VERSION-1-x86_64.pkg.tar.zst
+          \`\`\`
+
+          Then follow the steps it prints. SHA-256 in SHA256SUMS." \
+            packaging/*.pkg.tar.zst packaging/SHA256SUMS

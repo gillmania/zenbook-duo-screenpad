@@ -1,0 +1,12 @@
+[Unit]
+Description=ScreenPad Plus keys and modes for the Zenbook Duo 14
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+ExecStart=%h/.local/bin/zenbook-duo-screenpad daemon
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

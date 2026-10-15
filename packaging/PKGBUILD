@@ -1,0 +1,46 @@
+# Maintainer: Victor Gillholm (https://github.com/gillmania)
+#
+# The service and the touchpad helper. The shell plugin that draws the
+# touchpad surface is installed from the Omarchy plugin marketplace.
+pkgname=zenbook-duo-screenpad
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="ScreenPad Plus on the ASUS Zenbook Duo 14 under Omarchy: desktop, touchpad and off on its own key, window swap, brightness"
+arch=('x86_64')
+url="https://github.com/gillmania/zenbook-duo-screenpad"
+license=('MIT')
+depends=('systemd-libs' 'gcc-libs' 'glibc' 'asusctl' 'hyprland')
+makedepends=('cargo')
+options=('!debug')
+install=zenbook-duo-screenpad.install
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+prepare() {
+	cd "$pkgname-$pkgver/service"
+	export RUSTUP_TOOLCHAIN=stable
+	cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+	cd "$pkgname-$pkgver/service"
+	export RUSTUP_TOOLCHAIN=stable
+	export CARGO_TARGET_DIR=target
+	cargo build --frozen --release
+}
+
+package() {
+	cd "$pkgname-$pkgver"
+	install -Dm755 service/target/release/zenbook-duo-screenpad -t "$pkgdir/usr/bin"
+	install -Dm755 service/target/release/zenbook-duo-screenpad-touchpad -t "$pkgdir/usr/bin"
+
+	# The units in the repo point at a source install; packaged, both live in /usr/bin.
+	sed 's|%h/.local/bin/|/usr/bin/|' systemd/zenbook-duo-screenpad.service \
+		| install -Dm644 /dev/stdin "$pkgdir/usr/lib/systemd/user/zenbook-duo-screenpad.service"
+	sed 's|/usr/local/bin/|/usr/bin/|' systemd/zenbook-duo-screenpad-touchpad@.service \
+		| install -Dm644 /dev/stdin "$pkgdir/usr/lib/systemd/system/zenbook-duo-screenpad-touchpad@.service"
+
+	install -Dm644 hypr/zenbook-duo-screenpad.lua -t "$pkgdir/usr/share/$pkgname"
+	install -Dm644 README.md -t "$pkgdir/usr/share/doc/$pkgname"
+	install -Dm644 LICENSE -t "$pkgdir/usr/share/licenses/$pkgname"
+}
