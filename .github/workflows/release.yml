@@ -19,11 +19,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     container: archlinux:base-devel
+    defaults:
+      run:
+        shell: bash
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-
+      # Before checkout: without git there it downloads the files only, and
+      # git archive below needs the repository.
       - name: Install build tools
         run: pacman -Syu --noconfirm --needed cargo git github-cli
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Check the tag against the PKGBUILD
         run: |
