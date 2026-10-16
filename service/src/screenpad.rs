@@ -13,6 +13,7 @@ const DEFAULT_BRIGHTNESS: u8 = 50;
 // A touchpad only has to be seen: grey and dim, not read.
 const DEFAULT_TOUCHPAD_BRIGHTNESS: u8 = 15;
 const STEP: i16 = 5;
+const OUTDATED: &str = "Display Setups is older than 0.8.0 and cannot hold the ScreenPad";
 
 fn default_brightness(mode: Mode) -> u8 {
     if mode == Mode::Touchpad { DEFAULT_TOUCHPAD_BRIGHTNESS } else { DEFAULT_BRIGHTNESS }
@@ -48,13 +49,18 @@ impl ScreenPad {
     }
 
     // The ScreenPad key: off, desktop, touchpad, and off again.
+    // With a Display Setups too old to hold the ScreenPad, there is no
+    // touchpad, and the key goes from desktop straight to off.
     pub fn cycle(&mut self) -> Result<(), String> {
         let next = match self.mode {
             Mode::Off => Mode::Desktop,
             Mode::Desktop => Mode::Touchpad,
             Mode::Touchpad => Mode::Off,
         };
-        self.set_mode(next)
+        match self.set_mode(next) {
+            Err(e) if e == OUTDATED => self.set_mode(Mode::Off),
+            result => result,
+        }
     }
 
     pub fn set_mode(&mut self, mode: Mode) -> Result<(), String> {
@@ -100,15 +106,30 @@ impl ScreenPad {
         Ok(())
     }
 
+    // Without Display Setups, Hyprland's config is what puts the ScreenPad
+    // on: reloaded with the new mode saved, it brings back the monitor rule
+    // the user has, scale and place included, and hypr.lua does the rest
+    // (off, or reserved as a touchpad). Saying "on" through eval would make a
+    // new rule with Hyprland's defaults instead.
+    fn reload_as(mode: Mode) -> Result<(), String> {
+        state::save_mode(mode).map_err(|e| format!("could not save the mode: {e}"))?;
+        system::reload_config()
+    }
+
     fn go_off(&mut self) -> Result<(), String> {
         let Some(pad) = system::pad() else { return Err("the ScreenPad is not connected".into()) };
         self.keep_brightness();
         let was = self.mode;
         // Dark first, so the panel is never lit with no picture on it.
         system::set_pad_brightness(0)?;
+        let reserved = state::take_reserved();
         match system::hold("off") {
+            Hold::Done if reserved.is_some() => Self::reload_as(Mode::Off)?,
             Hold::Done => {}
             Hold::Refused(why) => {
+                if let Some(ids) = &reserved {
+                    let _ = state::save_reserved(ids);
+                }
                 // Nothing else is switched off, so a lit panel comes back as it
                 // was. A panel that was off already stays dark.
                 if was != Mode::Off {
@@ -117,7 +138,10 @@ impl ScreenPad {
                 }
                 return Err(why);
             }
-            Hold::Unavailable => {
+            Hold::Absent | Hold::Outdated => {
+                if reserved.is_some() {
+                    Self::reload_as(Mode::Off)?;
+                }
                 system::hypr_eval(&format!("hl.monitor({{ output = \"{}\", disabled = true }})", pad.name))?
             }
         }
@@ -129,17 +153,20 @@ impl ScreenPad {
     fn go_desktop(&mut self) -> Result<(), String> {
         let was = self.mode;
         self.keep_brightness();
-        system::set_pad_inputs(true)?;
+        let reserved = state::take_reserved();
         match system::hold("on") {
+            Hold::Done if reserved.is_some() => Self::reload_as(Mode::Desktop)?,
             Hold::Done => {}
             Hold::Refused(why) => {
+                if let Some(ids) = &reserved {
+                    let _ = state::save_reserved(ids);
+                }
                 system::osd_text("ScreenPad stays off");
                 return Err(why);
             }
-            Hold::Unavailable => {
-                system::hypr_eval(&format!("hl.monitor({{ output = \"{}\", disabled = false }})", system::PAD_SELECTOR))?
-            }
+            Hold::Absent | Hold::Outdated => Self::reload_as(Mode::Desktop)?,
         }
+        system::set_pad_inputs(true)?;
         Self::light(Mode::Desktop)?;
         if was == Mode::Touchpad {
             self.settle_focus();
@@ -147,42 +174,79 @@ impl ScreenPad {
         Ok(())
     }
 
-    // On, but out of the desktop: Display Setups moves it away from the other
-    // screens and its workspaces elsewhere, and the helper turns its touches
-    // into a touchpad. Hyprland's own handling of the touchscreen and the pen
-    // is switched off, so nothing reaches the desktop even before the grab.
+    // On, but out of the desktop: moved away from the other screens and its
+    // workspaces elsewhere, by Display Setups when it is there and by
+    // hypr.lua otherwise. The helper turns its touches into a touchpad.
+    // Hyprland's own handling of the touchscreen and the pen is switched off,
+    // so nothing reaches the desktop even before the grab.
     fn go_touchpad(&mut self) -> Result<(), String> {
         let was = self.mode;
         self.keep_brightness();
         system::set_pad_inputs(false)?;
+        let undo_inputs = || {
+            if was == Mode::Desktop {
+                let _ = system::set_pad_inputs(true);
+            }
+        };
         match system::hold("reserved") {
             Hold::Done => {}
             Hold::Refused(why) => {
-                if was == Mode::Desktop {
-                    let _ = system::set_pad_inputs(true);
-                }
+                undo_inputs();
                 system::osd_text("No touchpad now");
                 return Err(why);
             }
-            Hold::Unavailable => system::hypr_eval(&format!(
-                "hl.monitor({{ output = \"{}\", disabled = false, position = \"10000x10000\" }})",
-                system::PAD_SELECTOR
-            ))?,
+            Hold::Outdated => {
+                undo_inputs();
+                system::osd_text("Update Display Setups");
+                return Err(OUTDATED.into());
+            }
+            Hold::Absent => {
+                if let Err(e) = Self::reserve() {
+                    system::osd_text("No touchpad now");
+                    return self.fall_back(was, e);
+                }
+            }
         }
         if let Err(e) = system::touchpad("on") {
-            // Back to what it was rather than a lit panel that does nothing.
             system::osd_text("Touchpad unavailable");
-            let back = if was == Mode::Off { Mode::Off } else { Mode::Desktop };
-            self.mode = Mode::Touchpad;
-            let _ = match back {
-                Mode::Off => self.go_off(),
-                _ => self.go_desktop(),
-            };
-            self.mode = back;
-            let _ = state::save_mode(back);
-            return Err(e);
+            return self.fall_back(was, e);
         }
         Self::light(Mode::Touchpad)
+    }
+
+    // Without Display Setups: the workspaces the ScreenPad owns go to the
+    // file hypr.lua reads, and the config reloaded as a touchpad puts it out
+    // of the desktop. Done once it is far to the right of everything.
+    fn reserve() -> Result<(), String> {
+        let pad = system::pad().ok_or("the ScreenPad is not connected")?;
+        let ids: Vec<String> = system::workspace_owners()
+            .into_iter()
+            .filter(|(_, m)| *m == pad.name)
+            .map(|(id, _)| id.to_string())
+            .collect();
+        state::save_reserved(&ids.join(" ")).map_err(|e| format!("could not save the workspaces: {e}"))?;
+        Self::reload_as(Mode::Touchpad)?;
+        for _ in 0..20 {
+            if system::pad().is_some_and(|p| p.enabled && p.x >= 10000) {
+                return Ok(());
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+        Err("the ScreenPad was not moved out of the desktop (is zenbook-duo-screenpad.lua loaded?)".into())
+    }
+
+    // A touchpad that could not be made goes back to what it was, rather than
+    // a lit panel that does nothing.
+    fn fall_back(&mut self, was: Mode, e: String) -> Result<(), String> {
+        let back = if was == Mode::Off { Mode::Off } else { Mode::Desktop };
+        self.mode = Mode::Touchpad;
+        let _ = match back {
+            Mode::Off => self.go_off(),
+            _ => self.go_desktop(),
+        };
+        self.mode = back;
+        let _ = state::save_mode(back);
+        Err(e)
     }
 
     // Back from a touchpad, the ScreenPad shows its own workspace again and
