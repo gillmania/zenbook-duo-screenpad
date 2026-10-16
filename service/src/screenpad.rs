@@ -59,7 +59,9 @@ impl ScreenPad {
             Mode::Touchpad => Mode::Off,
         };
         match self.set_mode(next) {
-            Err(e) if next == Mode::Touchpad => {
+            // Only when the touchpad never came: a later failure (saving
+            // the mode, say) is reported, not covered by switching off.
+            Err(e) if next == Mode::Touchpad && self.mode != Mode::Touchpad => {
                 eprintln!("no touchpad ({e}), so off instead");
                 self.set_mode(Mode::Off)
             }
@@ -69,8 +71,14 @@ impl ScreenPad {
 
     pub fn set_mode(&mut self, mode: Mode) -> Result<(), String> {
         // Leaving a touchpad, the touchscreen is let go before anything else.
+        // A helper that is not running holds nothing; one that fails to let
+        // go is reported once the mode has changed, so the key still works.
+        let mut released = Ok(());
         if mode != Mode::Touchpad {
-            let _ = system::touchpad("off");
+            match system::touchpad("off") {
+                Err(e) if self.mode == Mode::Touchpad && e != system::HELPER_NOT_RUNNING => released = Err(e),
+                _ => {}
+            }
         }
         let result = match mode {
             Mode::Off => self.go_off(),
@@ -82,7 +90,8 @@ impl ScreenPad {
             state::save_mode(mode).map_err(|e| format!("could not save the mode: {e}"))?;
         }
         system::tell_shell(self.mode.name());
-        result
+        result?;
+        released.map_err(|e| format!("the touchpad helper did not let go of the touchscreen: {e}"))
     }
 
     // The level the panel has now is kept for its mode, for next time. Only a

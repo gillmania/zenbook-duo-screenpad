@@ -244,12 +244,14 @@ pub fn osd_level(pct: u8) {
 
 // The privileged helper (zenbook-duo-screenpad-touchpad@<uid>.service) that
 // grabs the touchscreen and feeds a virtual touchpad. Only "on" and "off".
+pub const HELPER_NOT_RUNNING: &str = "the touchpad helper is not running";
+
 pub fn touchpad(command: &str) -> Result<(), String> {
     use std::io::{BufRead, BufReader, Write};
     let uid = unsafe { libc::getuid() };
     let path = format!("/run/zenbook-duo-screenpad-touchpad-{uid}/socket");
     let mut stream = std::os::unix::net::UnixStream::connect(&path)
-        .map_err(|_| "the touchpad helper is not running".to_string())?;
+        .map_err(|_| HELPER_NOT_RUNNING.to_string())?;
     let _ = stream.set_read_timeout(Some(Duration::from_secs(3)));
     stream.write_all(format!("{command}\n").as_bytes()).map_err(|e| e.to_string())?;
     let mut answer = String::new();

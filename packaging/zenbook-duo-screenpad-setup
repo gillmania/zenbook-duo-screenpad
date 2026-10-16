@@ -4,7 +4,7 @@
 # again. Exits non-zero if a step that was asked for did not complete.
 #
 #   zenbook-duo-screenpad-setup            set up
-#   zenbook-duo-screenpad-setup --remove   undo, before 'sudo pacman -R zenbook-duo-screenpad'
+#   zenbook-duo-screenpad-setup --remove   uninstall, before 'sudo pacman -R zenbook-duo-screenpad'
 #   --yes                                  answer yes to every question (needed without a terminal)
 #   --any-model                            set up on a machine that is not a UX481/UX482
 #
@@ -12,6 +12,7 @@
 # helper unit, through sudo in a terminal and pkexec (a password dialog)
 # otherwise. Nothing is downloaded except the shell plugin, which Omarchy's own
 # 'omarchy plugin add' clones from the repository's current main branch.
+# --remove uninstalls; it does not bring back what was there before setup.
 
 set -euo pipefail
 
@@ -32,7 +33,7 @@ for arg in "$@"; do
 	--remove) remove=true ;;
 	--yes) yes=true ;;
 	--any-model) any_model=true ;;
-	-h | --help) sed -n '2,14s/^# \{0,1\}//p' "$0"; exit 0 ;;
+	-h | --help) sed -n '2,15s/^# \{0,1\}//p' "$0"; exit 0 ;;
 	*) echo "unknown option: $arg" >&2; exit 2 ;;
 	esac
 done
@@ -55,28 +56,62 @@ as_root() {
 	if [[ -t 0 ]]; then sudo "$@"; else pkexec "$@"; fi
 }
 
-# Rewrites hyprland.lua through a temporary file next to it, renamed over the
-# real file (a symlink is followed, not replaced), after a backup.
-write_conf() {
+# hyprland.lua is replaced only once its new content is complete: the function
+# named in $1 writes it to a temporary file next to the real one, which, after
+# a backup, is renamed over it. A symlink is followed, not replaced. On any
+# failure the file is left as it was.
+replace_conf() {
 	local target tmp
-	target=$(readlink -f "$conf")
-	tmp=$(mktemp "$target.zenbook-duo-screenpad.XXXXXX")
-	cat >"$tmp"
-	chmod --reference="$target" "$tmp"
-	cp -p "$target" "$target.bak.$(date +%Y%m%d-%H%M%S).$$"
-	mv "$tmp" "$target"
+	target=$(readlink -f "$conf") || return 1
+	tmp=$(mktemp "$target.zenbook-duo-screenpad.XXXXXX") || return 1
+	if "$1" >"$tmp" &&
+		chmod --reference="$target" "$tmp" &&
+		cp -p "$target" "$target.bak.$(date +%Y%m%d-%H%M%S).$$" &&
+		mv "$tmp" "$target"; then
+		return 0
+	fi
+	rm -f "$tmp"
+	return 1
+}
+
+conf_without_line() {
+	grep -vxF "$line" "$conf" || [[ $? -eq 1 ]]
+}
+
+# A file that does not end in a newline gets one, so the line stands alone.
+conf_with_line() {
+	local last
+	last=$(tail -c 1 "$conf") || return 1
+	cat "$conf" || return 1
+	[[ -z $last ]] || echo
+	printf '%s\n' "$line"
 }
 
 has_line() {
 	[[ -f $conf ]] && grep -qxF "$line" "$conf"
 }
 
-# The installed plugins as JSON; fails when Omarchy cannot be asked.
-plugins_json() {
+# The shell plugin's state: enabled, disabled or absent. Fails when Omarchy
+# cannot be asked or answers in a form not understood.
+plugin_state() {
 	local out
 	out=$(omarchy plugin list --json) || return 1
-	jq -e 'type == "array"' <<<"$out" >/dev/null || return 1
-	printf '%s' "$out"
+	jq -er --arg id "$plugin_id" '
+		if type == "array" and all(.[]; type == "object" and (.id | type) == "string") then
+			(map(select(.id == $id)) | if length == 0 then "absent"
+				elif (.[0].enabled | type) != "boolean" then error("no enabled field")
+				elif .[0].enabled then "enabled" else "disabled" end)
+		else error("not a plugin list") end' <<<"$out"
+}
+
+check_hyprland() {
+	local errors
+	hyprctl reload >/dev/null || { fail "reloading Hyprland"; return; }
+	errors=$(hyprctl configerrors) || errors="hyprctl configerrors failed"
+	if [[ -n ${errors//[[:space:]]/} ]]; then
+		echo "$errors" >&2
+		fail "Hyprland reports config errors"
+	fi
 }
 
 [[ $EUID -ne 0 ]] || { echo "Run this as your own user, not as root." >&2; exit 1; }
@@ -90,39 +125,46 @@ done
 systemctl --user show-environment >/dev/null 2>&1 || { echo "Cannot reach your systemd user session; run this in your desktop session." >&2; exit 1; }
 
 if $remove; then
-	# Out of the touchpad first, while the service still runs: the helper then
-	# lets go of the touchscreen, and the ScreenPad is left on as a screen.
+	# Out of the touchpad first, while the service still runs: the helper lets
+	# go of the touchscreen, and the ScreenPad is left on as a plain screen, no
+	# longer held by Display Setups. Nothing else is removed until that is done.
+	echo "Uninstalling: the ScreenPad goes back on the desktop and is released first."
+	ask "Go on?" || exit 1
 	if systemctl --user is-active --quiet "$user_unit"; then
-		zenbook-duo-screenpad mode desktop >/dev/null || fail "putting the ScreenPad back on the desktop"
+		zenbook-duo-screenpad mode desktop >/dev/null || {
+			echo "The ScreenPad could not be put back on the desktop; nothing was removed." >&2
+			echo "See: journalctl --user -u $user_unit" >&2
+			exit 1
+		}
+	elif systemctl is-active --quiet "$helper_unit"; then
+		echo "Note: the service is not running, so the helper may still hold the touchscreen"
+		echo "until it is stopped below."
 	fi
-	if has_line; then
-		if ask "Remove the line that loads the key bindings from $conf?"; then
-			{ grep -vxF "$line" "$conf" || [[ $? -eq 1 ]]; } | write_conf || fail "removing the line from $conf"
-		fi
+	if command -v omarchy-shell >/dev/null; then
+		out=$(omarchy-shell display-setups unhold "desc:BOE 0x0921" "ScreenPad key" 2>&1) ||
+			[[ $out == *"Target not found"* ]] || fail "releasing the hold in Display Setups ($out)"
+	fi
+	if has_line && ask "Remove the line that loads the key bindings from $conf?"; then
+		replace_conf conf_without_line || fail "removing the line from $conf"
 	fi
 	if systemctl --user is-enabled --quiet "$user_unit" 2>/dev/null || systemctl --user is-active --quiet "$user_unit"; then
 		if ask "Stop and disable the service?"; then
 			systemctl --user disable --now "$user_unit" || fail "stopping the service"
 		fi
 	fi
-	# Display Setups, when installed, keeps the ScreenPad held until told otherwise.
-	if command -v omarchy-shell >/dev/null; then
-		out=$(omarchy-shell display-setups unhold "desc:BOE 0x0921" "ScreenPad key" 2>&1) ||
-			[[ $out == *"Target not found"* ]] || fail "releasing the hold in Display Setups ($out)"
-	fi
 	if systemctl is-enabled --quiet "$helper_unit" 2>/dev/null || systemctl is-active --quiet "$helper_unit"; then
 		if ask "Stop and disable the touchpad helper (needs your password)?"; then
 			as_root systemctl disable --now "$helper_unit" || fail "stopping the touchpad helper"
 		fi
 	fi
-	if json=$(plugins_json); then
-		if jq -e --arg id "$plugin_id" 'any(.[]; .id == $id)' <<<"$json" >/dev/null && ask "Remove the shell plugin $plugin_id?"; then
+	if state=$(plugin_state); then
+		if [[ $state != absent ]] && ask "Remove the shell plugin $plugin_id?"; then
 			omarchy plugin remove "$plugin_id" --yes || fail "removing the shell plugin"
 		fi
 	else
-		fail "listing the shell plugins (omarchy plugin list)"
+		fail "reading the shell plugins (omarchy plugin list --json)"
 	fi
-	hyprctl reload >/dev/null || fail "reloading Hyprland"
+	check_hyprland
 	echo
 	if ((${#failed[@]})); then
 		echo "Not everything was undone: ${failed[*]}. Run it again once that is fixed." >&2
@@ -150,9 +192,12 @@ for path in /etc/systemd/system/zenbook-duo-screenpad-touchpad@.service /usr/loc
 	"$HOME/.config/systemd/user/$user_unit" "$HOME/.local/bin/zenbook-duo-screenpad"; do
 	[[ -e $path ]] && old+=("$path")
 done
-if grep -v '^[[:space:]]*--' "$conf" | grep -F 'zenbook-duo-screenpad.lua' | grep -qvxF "$line"; then
+mentions=$(grep -F 'zenbook-duo-screenpad.lua' "$conf") || [[ $? -eq 1 ]] || { echo "Cannot read $conf." >&2; exit 1; }
+while IFS= read -r l; do
+	[[ -z $l || $l == "$line" || $l =~ ^[[:space:]]*-- ]] && continue
 	old+=("a line in $conf that loads another zenbook-duo-screenpad.lua")
-fi
+	break
+done <<<"$mentions"
 if ((${#old[@]})); then
 	echo "An install from source is still here, and would run beside the package:" >&2
 	printf '  %s\n' "${old[@]}" >&2
@@ -196,22 +241,22 @@ else
 	echo "goes at the end of $conf (a backup is made first):"
 	echo "  $line"
 	if ask "Add it?"; then
-		# A file that does not end in a newline gets one, so the line stands alone.
-		{ cat "$conf"; [[ -z $(tail -c 1 "$conf") ]] || echo; printf '%s\n' "$line"; } | write_conf || fail "adding the line to $conf"
+		replace_conf conf_with_line || fail "adding the line to $conf"
 	else
 		echo "Not added. The ScreenPad keys work, but SUPER+ALT+P/O/L and the sun keys are not bound."
 	fi
 fi
 
 echo
-if json=$(plugins_json); then
-	if jq -e --arg id "$plugin_id" 'any(.[]; .id == $id and .enabled)' <<<"$json" >/dev/null; then
-		echo "Shell plugin: already installed (update it with: omarchy plugin update $plugin_id)."
-	elif jq -e --arg id "$plugin_id" 'any(.[]; .id == $id)' <<<"$json" >/dev/null; then
+if state=$(plugin_state); then
+	case $state in
+	enabled) echo "Shell plugin: already installed (update it with: omarchy plugin update $plugin_id)." ;;
+	disabled)
 		if ask "The shell plugin is installed but disabled. Enable it?"; then
 			omarchy plugin enable "$plugin_id" || fail "enabling the shell plugin"
 		fi
-	else
+		;;
+	absent)
 		echo "The touchpad surface is the shell plugin, cloned by 'omarchy plugin add' from"
 		echo "the current main branch of $plugin_url"
 		if ask "Add and enable it?"; then
@@ -219,26 +264,27 @@ if json=$(plugins_json); then
 		else
 			echo "Not added. The touchpad mode then shows no surface."
 		fi
-	fi
+		;;
+	esac
 else
-	fail "listing the shell plugins (omarchy plugin list)"
+	fail "reading the shell plugins (omarchy plugin list --json)"
 fi
 
 echo
-hyprctl reload >/dev/null || fail "reloading Hyprland"
-errors=$(hyprctl configerrors) || errors="hyprctl configerrors failed"
-if [[ -n ${errors//[[:space:]]/} ]]; then
-	echo "$errors" >&2
-	fail "Hyprland reports config errors"
-fi
-if systemctl --user is-active --quiet "$user_unit"; then
+check_hyprland
+# An enabled service has to be running and answering, whoever started it.
+if systemctl --user is-enabled --quiet "$user_unit" 2>/dev/null; then
 	status=""
 	for _ in 1 2 3 4 5 6 7 8 9 10; do
 		status=$(zenbook-duo-screenpad status 2>&1) && break
 		status=""
-		sleep 0.3
+		sleep 0.5
 	done
-	[[ -n $status ]] && echo "Status: $status" || fail "the service does not answer (journalctl --user -u $user_unit)"
+	if [[ -n $status ]] && systemctl --user is-active --quiet "$user_unit"; then
+		echo "Status: $status"
+	else
+		fail "the service is not running or not answering (journalctl --user -u $user_unit)"
+	fi
 fi
 
 if ((${#failed[@]})); then
