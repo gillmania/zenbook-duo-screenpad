@@ -1,0 +1,142 @@
+#!/bin/bash
+# Finish (or undo) the setup of the installed zenbook-duo-screenpad package, as
+# your own user. Asks before each change; safe to run again.
+#
+#   zenbook-duo-screenpad-setup            set up
+#   zenbook-duo-screenpad-setup --remove   undo, before 'sudo pacman -R zenbook-duo-screenpad'
+#   --yes                                  answer yes to every question
+#
+# Root is used for one thing only: enabling or disabling the packaged touchpad
+# helper unit, through sudo in a terminal and pkexec otherwise. Nothing is
+# downloaded except the shell plugin, by Omarchy's own 'omarchy plugin add'.
+
+set -euo pipefail
+
+share=/usr/share/zenbook-duo-screenpad
+lua="$share/zenbook-duo-screenpad.lua"
+line="local f = io.open(\"$lua\") if f then f:close() dofile(\"$lua\") end"
+conf="$HOME/.config/hypr/hyprland.lua"
+helper_unit="zenbook-duo-screenpad-touchpad@$(id -u).service"
+user_unit=zenbook-duo-screenpad.service
+plugin_id=io.github.gillmania.zenbook-duo-screenpad
+plugin_url=https://github.com/gillmania/zenbook-duo-screenpad.git
+
+remove=false
+yes=false
+for arg in "$@"; do
+	case $arg in
+	--remove) remove=true ;;
+	--yes) yes=true ;;
+	-h | --help) sed -n '2,11s/^# \{0,1\}//p' "$0"; exit 0 ;;
+	*) echo "unknown option: $arg" >&2; exit 2 ;;
+	esac
+done
+
+ask() {
+	$yes && return 0
+	local answer
+	read -r -p "$1 [y/N] " answer
+	[[ $answer == [yY]* ]]
+}
+
+as_root() {
+	echo "  as root: $*"
+	if [[ -t 0 ]]; then sudo "$@"; else pkexec "$@"; fi
+}
+
+backup_conf() {
+	cp "$conf" "$conf.bak.$(date +%s)"
+}
+
+plugin_installed() {
+	omarchy plugin list --json 2>/dev/null | grep -q "\"$plugin_id\""
+}
+
+[[ $EUID -ne 0 ]] || { echo "Run this as your own user, not as root." >&2; exit 1; }
+[[ -f $lua ]] || { echo "The zenbook-duo-screenpad package is not installed ($lua is missing)." >&2; exit 1; }
+[[ -f $conf ]] || { echo "$conf not found; is this Omarchy?" >&2; exit 1; }
+
+if $remove; then
+	if grep -qxF "$line" "$conf" && ask "Remove the line that loads the key bindings from $conf?"; then
+		backup_conf
+		grep -vxF "$line" "$conf" >"$conf.tmp" && cat "$conf.tmp" >"$conf" && rm "$conf.tmp"
+	fi
+	systemctl --user disable --now "$user_unit" 2>/dev/null || true
+	# Display Setups (if there) keeps the ScreenPad held until told otherwise.
+	omarchy-shell display-setups unhold "desc:BOE 0x0921" "ScreenPad key" >/dev/null 2>&1 || true
+	if systemctl is-enabled --quiet "$helper_unit" 2>/dev/null && ask "Stop and disable the touchpad helper (needs your password)?"; then
+		as_root systemctl disable --now "$helper_unit"
+	fi
+	if plugin_installed && ask "Remove the shell plugin $plugin_id?"; then
+		omarchy plugin remove "$plugin_id" --yes
+	fi
+	hyprctl reload >/dev/null 2>&1 || true
+	echo
+	echo "Done. Remove the package with: sudo pacman -R zenbook-duo-screenpad"
+	exit 0
+fi
+
+# This is made for one machine; on another it does nothing useful.
+model=$(cat /sys/class/dmi/id/product_name 2>/dev/null || true)
+if [[ $model != *UX482* ]]; then
+	echo "This is made for the ASUS Zenbook Duo 14 UX482; this machine is \"$model\"."
+	ask "Set it up anyway?" || exit 1
+fi
+systemctl is-active --quiet asusd || echo "Note: asusd is not running; the ScreenPad's brightness needs it (systemctl enable --now asusd)."
+
+# Left by an install from source, they would run beside the package's.
+for old in /etc/systemd/system/zenbook-duo-screenpad-touchpad@.service /usr/local/bin/zenbook-duo-screenpad-touchpad \
+	"$HOME/.config/systemd/user/$user_unit" "$HOME/.local/bin/zenbook-duo-screenpad"; do
+	[[ -e $old ]] && echo "Note: $old is from an install from source and overrides the package; remove it (see the README)."
+done
+
+echo
+if systemctl is-enabled --quiet "$helper_unit" 2>/dev/null && systemctl is-active --quiet "$helper_unit"; then
+	echo "Touchpad helper: already running."
+else
+	echo "The touchpad mode needs the packaged helper running as root for your user:"
+	echo "  $helper_unit (it alone opens the touchscreen and /dev/uinput)"
+	if ask "Enable and start it (needs your password)?"; then
+		as_root systemctl enable --now "$helper_unit"
+	else
+		echo "Not started. The ScreenPad key then skips the touchpad mode."
+	fi
+fi
+
+systemctl --user daemon-reload
+systemctl --user enable --now "$user_unit"
+echo "Service: running."
+
+if grep -qxF "$line" "$conf"; then
+	echo "Key bindings: already loaded from $conf."
+else
+	echo
+	echo "To bind its keys and keep the ScreenPad off across config reloads, this line"
+	echo "goes at the end of $conf (a backup is made first):"
+	echo "  $line"
+	if ask "Add it?"; then
+		backup_conf
+		printf '%s\n' "$line" >>"$conf"
+	else
+		echo "Not added. The ScreenPad keys work, but SUPER+ALT+P/O/L and the sun keys are not bound."
+	fi
+fi
+
+if plugin_installed; then
+	echo "Shell plugin: already installed (update it with: omarchy plugin update $plugin_id)."
+else
+	echo
+	echo "The touchpad surface is the shell plugin, added from $plugin_url"
+	if ask "Add and enable it?"; then
+		omarchy plugin add "$plugin_url" --enable --yes
+	else
+		echo "Not added. The touchpad mode then shows no surface."
+	fi
+fi
+
+hyprctl reload >/dev/null
+errors=$(hyprctl configerrors)
+[[ -z ${errors//[[:space:]]/} ]] || { echo "Hyprland reports config errors:"; echo "$errors"; }
+for _ in 1 2 3 4 5 6 7 8 9 10; do zenbook-duo-screenpad status >/dev/null 2>&1 && break; sleep 0.3; done
+echo
+echo "Set up. Status: $(zenbook-duo-screenpad status 2>&1)"

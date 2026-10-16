@@ -64,21 +64,25 @@ cannot, so a package that does not match is never installed.
 
 ```bash
 cd "$(mktemp -d)"
-curl -fLO https://github.com/gillmania/zenbook-duo-screenpad/releases/download/v0.1.1/zenbook-duo-screenpad-0.1.1-1-x86_64.pkg.tar.zst
-echo "e81237d0eba36a5dbebe4f28d6c3512b45737352534e972d6a2d8eb9af5b7e55  zenbook-duo-screenpad-0.1.1-1-x86_64.pkg.tar.zst" | sha256sum -c -
-sudo pacman -U ./zenbook-duo-screenpad-0.1.1-1-x86_64.pkg.tar.zst
+curl -fLO https://github.com/gillmania/zenbook-duo-screenpad/releases/download/v0.1.2/zenbook-duo-screenpad-0.1.2-1-x86_64.pkg.tar.zst
+echo "SHA256-OF-THE-v0.1.2-PACKAGE  zenbook-duo-screenpad-0.1.2-1-x86_64.pkg.tar.zst" | sha256sum -c -
+sudo pacman -U ./zenbook-duo-screenpad-0.1.2-1-x86_64.pkg.tar.zst
 ```
 
 Run the lines one at a time, and stop if `sha256sum` does not print `OK`.
 
-pacman then prints three steps to finish, as your own user: start the
-touchpad helper, start the service, and add one line to
-`~/.config/hypr/hyprland.lua` that loads the key bindings. The touchpad surface
-is the shell plugin in this repository:
+Then finish the setup as your own user, not with sudo:
 
 ```bash
-omarchy plugin add https://github.com/gillmania/zenbook-duo-screenpad.git --enable
+zenbook-duo-screenpad-setup
 ```
+
+It checks that this is a UX482 and that `asusd` is running, and asks before
+each step: it enables the touchpad helper (your password, once), starts the
+service, adds one line to the end of `~/.config/hypr/hyprland.lua` that loads
+the key bindings (after a backup), and adds the shell plugin that draws the
+touchpad surface with `omarchy plugin add`. Run it again at any time; what is
+done already is left alone. `--yes` answers every question with yes.
 
 ### From source
 
@@ -104,9 +108,15 @@ restart the shell (`omarchy restart shell`) when `Service.qml` has changed.
 
 ## Remove
 
-Installed from a release: `sudo pacman -R zenbook-duo-screenpad`, then
-`omarchy plugin remove io.github.gillmania.zenbook-duo-screenpad`, the
-`hyprland.lua` line, and the last two commands below. From source:
+Installed from a release:
+
+```bash
+zenbook-duo-screenpad-setup --remove
+sudo pacman -R zenbook-duo-screenpad
+rm -r "${XDG_STATE_HOME:-$HOME/.local/state}/zenbook-duo-screenpad"
+```
+
+From source:
 
 ```bash
 sudo systemctl disable --now zenbook-duo-screenpad-touchpad@$(id -u).service

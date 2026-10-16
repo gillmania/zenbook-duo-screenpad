@@ -1,16 +1,9 @@
 post_install() {
 	cat <<'MSG'
-==> zenbook-duo-screenpad: three steps finish the setup, as your own user:
-
-  1. Start the touchpad helper for your user:
-       sudo systemctl enable --now zenbook-duo-screenpad-touchpad@$(id -u).service
-  2. Start the service:
-       systemctl --user enable --now zenbook-duo-screenpad.service
-  3. Load the key bindings: add this line at the end of ~/.config/hypr/hyprland.lua
-       local f = io.open("/usr/share/zenbook-duo-screenpad/zenbook-duo-screenpad.lua") if f then f:close() dofile("/usr/share/zenbook-duo-screenpad/zenbook-duo-screenpad.lua") end
-
-  The touchpad surface is a shell plugin:
-       omarchy plugin add https://github.com/gillmania/zenbook-duo-screenpad.git --enable
+==> zenbook-duo-screenpad: finish the setup as your own user (not with sudo):
+       zenbook-duo-screenpad-setup
+    It asks before each step: the touchpad helper, the service, one line in
+    ~/.config/hypr/hyprland.lua for the key bindings, and the shell plugin.
 MSG
 }
 
@@ -20,6 +13,7 @@ post_upgrade() {
 }
 
 pre_remove() {
-	echo "==> zenbook-duo-screenpad: remove the hyprland.lua line, and run"
+	echo "==> zenbook-duo-screenpad: if you have not run 'zenbook-duo-screenpad-setup --remove',"
+	echo "    remove the hyprland.lua line and the shell plugin yourself, and run"
 	echo "    omarchy-shell display-setups unhold \"desc:BOE 0x0921\" \"ScreenPad key\""
 }
