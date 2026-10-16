@@ -58,9 +58,18 @@ use it, use 0.8.0 or later.
 
 ### From a release
 
+Download the package, check it against the SHA-256 below, and install that
+file. A release can be replaced after the fact; the checksum written here
+cannot, so a package that does not match is never installed.
+
 ```bash
-sudo pacman -U https://github.com/gillmania/zenbook-duo-screenpad/releases/download/v0.1.1/zenbook-duo-screenpad-0.1.1-1-x86_64.pkg.tar.zst
+cd "$(mktemp -d)"
+curl -fLO https://github.com/gillmania/zenbook-duo-screenpad/releases/download/v0.1.1/zenbook-duo-screenpad-0.1.1-1-x86_64.pkg.tar.zst
+echo "e81237d0eba36a5dbebe4f28d6c3512b45737352534e972d6a2d8eb9af5b7e55  zenbook-duo-screenpad-0.1.1-1-x86_64.pkg.tar.zst" | sha256sum -c -
+sudo pacman -U ./zenbook-duo-screenpad-0.1.1-1-x86_64.pkg.tar.zst
 ```
+
+Run the lines one at a time, and stop if `sha256sum` does not print `OK`.
 
 pacman then prints three steps to finish, as your own user: start the
 touchpad helper, start the service, and add one line to
