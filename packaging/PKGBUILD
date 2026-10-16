@@ -13,7 +13,13 @@ depends=('systemd-libs' 'gcc-libs' 'glibc' 'asusctl' 'hyprland')
 makedepends=('cargo')
 options=('!debug')
 install=zenbook-duo-screenpad.install
-source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+# Built from the checkout this file is in, never downloaded: a tag or a
+# release archive can change after review, the commit you have cannot. Make
+# the archive first, from the packaging directory:
+#   git archive --format=tar.gz --prefix="zenbook-duo-screenpad-$pkgver/" \
+#     -o "zenbook-duo-screenpad-$pkgver.tar.gz" HEAD
+# The crates come from crates.io, checked against Cargo.lock (--locked).
+source=("$pkgname-$pkgver.tar.gz")
 sha256sums=('SKIP')
 
 prepare() {
