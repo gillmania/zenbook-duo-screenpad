@@ -18,7 +18,9 @@ jobs:
   package:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    container: archlinux:base-devel
+    # Pinned: archlinux:base-devel as of 2026-10-16. Its packages are updated
+    # below from the signed Arch repositories.
+    container: archlinux:base-devel@sha256:061679925e5d5028f2df9395d441ce6c4b9accf0157ff3486c06b6962e014ef1
     defaults:
       run:
         shell: bash
