@@ -34,15 +34,23 @@ fn run(program: &str, args: &[&str]) -> Option<Output> {
         .stderr(Stdio::piped())
         .spawn()
         .ok()?;
-    // Read both pipes on their own threads, so a full pipe cannot stall the child.
+    // Read both pipes on their own threads, so a full pipe cannot stall the
+    // child. What is read so far is kept where it can be taken at any time,
+    // and the channel says when a pipe has closed.
     let read = |pipe: Option<Box<dyn Read + Send>>| {
+        let text = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (tx, rx) = std::sync::mpsc::channel::<()>();
+        let kept = text.clone();
         thread::spawn(move || {
-            let mut text = String::new();
             if let Some(mut pipe) = pipe {
-                let _ = pipe.read_to_string(&mut text);
+                let mut buf = [0u8; 4096];
+                while let Ok(n @ 1..) = pipe.read(&mut buf) {
+                    kept.lock().unwrap().extend_from_slice(&buf[..n]);
+                }
             }
-            text
-        })
+            let _ = tx.send(());
+        });
+        (text, rx)
     };
     let stdout = read(child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
     let stderr = read(child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
@@ -61,11 +69,16 @@ fn run(program: &str, args: &[&str]) -> Option<Output> {
             }
         }
     };
-    Some(Output {
-        ok: status.success(),
-        stdout: stdout.join().unwrap_or_default(),
-        stderr: stderr.join().unwrap_or_default(),
-    })
+    // A child the command left running in the background (an OSD, say) may
+    // keep the pipes open, so they get a moment to close, no more: what the
+    // command wrote before it ended is there by then.
+    let closed_by = Instant::now() + Duration::from_millis(200);
+    let text = |(text, rx): (std::sync::Arc<std::sync::Mutex<Vec<u8>>>, std::sync::mpsc::Receiver<()>)| {
+        let _ = rx.recv_timeout(closed_by.saturating_duration_since(Instant::now()));
+        let bytes = text.lock().unwrap().clone();
+        String::from_utf8_lossy(&bytes).into_owned()
+    };
+    Some(Output { ok: status.success(), stdout: text(stdout), stderr: text(stderr) })
 }
 
 fn output(program: &str, args: &[&str]) -> Option<String> {
@@ -314,6 +327,15 @@ mod tests {
         assert!(!out.ok);
         assert_eq!(out.stdout.trim(), "answer");
         assert_eq!(out.stderr.trim(), "why");
+    }
+
+    #[test]
+    fn run_does_not_wait_for_a_background_child() {
+        let started = Instant::now();
+        let out = run("sh", &["-c", "sleep 30 & echo done"]).unwrap();
+        assert!(out.ok);
+        assert_eq!(out.stdout.trim(), "done");
+        assert!(started.elapsed() < Duration::from_secs(1));
     }
 
     #[test]
