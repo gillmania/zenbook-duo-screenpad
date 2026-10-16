@@ -60,25 +60,33 @@ use it, use 0.8.0 or later.
 
 Download the package, check it against the SHA-256 below, and install that
 file. A release can be replaced after the fact; the checksum written here
-cannot, so a package that does not match is never installed.
+cannot. The commands are joined with `&&`, so pacman never runs when the
+check fails:
 
 ```bash
-cd "$(mktemp -d)"
-curl -fLO https://github.com/gillmania/zenbook-duo-screenpad/releases/download/v0.1.1/zenbook-duo-screenpad-0.1.1-1-x86_64.pkg.tar.zst
-echo "e81237d0eba36a5dbebe4f28d6c3512b45737352534e972d6a2d8eb9af5b7e55  zenbook-duo-screenpad-0.1.1-1-x86_64.pkg.tar.zst" | sha256sum -c -
-sudo pacman -U ./zenbook-duo-screenpad-0.1.1-1-x86_64.pkg.tar.zst
+cd "$(mktemp -d)" &&
+curl -fLO https://github.com/gillmania/zenbook-duo-screenpad/releases/download/v0.1.2/zenbook-duo-screenpad-0.1.2-1-x86_64.pkg.tar.zst &&
+echo "<the v0.1.2 checksum, written here once it is released>  zenbook-duo-screenpad-0.1.2-1-x86_64.pkg.tar.zst" | sha256sum -c - &&
+sudo pacman -U ./zenbook-duo-screenpad-0.1.2-1-x86_64.pkg.tar.zst
 ```
 
-Run the lines one at a time, and stop if `sha256sum` does not print `OK`.
-
-pacman then prints three steps to finish, as your own user: start the
-touchpad helper, start the service, and add one line to
-`~/.config/hypr/hyprland.lua` that loads the key bindings. The touchpad surface
-is the shell plugin in this repository:
+Then finish the setup as your own user, in your Hyprland session (not with
+sudo):
 
 ```bash
-omarchy plugin add https://github.com/gillmania/zenbook-duo-screenpad.git --enable
+zenbook-duo-screenpad-setup
 ```
+
+It checks that this is a UX481/UX482 and that no install from source is left,
+then asks before each step: enabling the touchpad helper (your password, once),
+starting the service, adding one line to the end of
+`~/.config/hypr/hyprland.lua` that loads the key bindings (after a backup), and
+adding the shell plugin that draws the touchpad surface. The plugin comes from
+`omarchy plugin add`, which clones this repository's current `main`, not a
+pinned commit. Run it again at any time: what is done already is left alone,
+and it exits with an error naming any step that did not complete. Without a
+terminal (an AI agent, say) it needs `--yes`, which agrees to every step; the
+password is then asked for in a dialog.
 
 ### From source
 
@@ -104,9 +112,15 @@ restart the shell (`omarchy restart shell`) when `Service.qml` has changed.
 
 ## Remove
 
-Installed from a release: `sudo pacman -R zenbook-duo-screenpad`, then
-`omarchy plugin remove io.github.gillmania.zenbook-duo-screenpad`, the
-`hyprland.lua` line, and the last two commands below. From source:
+Installed from a release:
+
+```bash
+zenbook-duo-screenpad-setup --remove
+sudo pacman -R zenbook-duo-screenpad
+rm -r "${XDG_STATE_HOME:-$HOME/.local/state}/zenbook-duo-screenpad"
+```
+
+From source:
 
 ```bash
 sudo systemctl disable --now zenbook-duo-screenpad-touchpad@$(id -u).service

@@ -34,15 +34,23 @@ fn run(program: &str, args: &[&str]) -> Option<Output> {
         .stderr(Stdio::piped())
         .spawn()
         .ok()?;
-    // Read both pipes on their own threads, so a full pipe cannot stall the child.
+    // Read both pipes on their own threads, so a full pipe cannot stall the
+    // child. What is read so far is kept where it can be taken at any time,
+    // and the channel says when a pipe has closed.
     let read = |pipe: Option<Box<dyn Read + Send>>| {
+        let text = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (tx, rx) = std::sync::mpsc::channel::<()>();
+        let kept = text.clone();
         thread::spawn(move || {
-            let mut text = String::new();
             if let Some(mut pipe) = pipe {
-                let _ = pipe.read_to_string(&mut text);
+                let mut buf = [0u8; 4096];
+                while let Ok(n @ 1..) = pipe.read(&mut buf) {
+                    kept.lock().unwrap().extend_from_slice(&buf[..n]);
+                }
             }
-            text
-        })
+            let _ = tx.send(());
+        });
+        (text, rx)
     };
     let stdout = read(child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
     let stderr = read(child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
@@ -61,11 +69,16 @@ fn run(program: &str, args: &[&str]) -> Option<Output> {
             }
         }
     };
-    Some(Output {
-        ok: status.success(),
-        stdout: stdout.join().unwrap_or_default(),
-        stderr: stderr.join().unwrap_or_default(),
-    })
+    // A child the command left running in the background (an OSD, say) may
+    // keep the pipes open, so they get a moment to close, no more: what the
+    // command wrote before it ended is there by then.
+    let closed_by = Instant::now() + Duration::from_millis(200);
+    let text = |(text, rx): (std::sync::Arc<std::sync::Mutex<Vec<u8>>>, std::sync::mpsc::Receiver<()>)| {
+        let _ = rx.recv_timeout(closed_by.saturating_duration_since(Instant::now()));
+        let bytes = text.lock().unwrap().clone();
+        String::from_utf8_lossy(&bytes).into_owned()
+    };
+    Some(Output { ok: status.success(), stdout: text(stdout), stderr: text(stderr) })
 }
 
 fn output(program: &str, args: &[&str]) -> Option<String> {
@@ -163,9 +176,11 @@ fn display_setups(args: &[&str]) -> Hold {
 
 // At login this service can start before the shell has read its holds;
 // Display Setups then says so, and is asked again for up to half a minute
-// rather than taken for a refusal.
+// rather than taken for a refusal (plus one last command, at most
+// COMMAND_TIMEOUT; the client's limit in main.rs covers two of these).
 pub fn hold(state: &str) -> Hold {
-    for _ in 0..30 {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while Instant::now() < deadline {
         match display_setups(&["hold", PAD_SELECTOR, state, OWNER]) {
             Hold::Refused(why) if why.contains("still starting") => thread::sleep(Duration::from_secs(1)),
             answer => return answer,
@@ -237,19 +252,21 @@ pub fn main_brightness(step: &str) {
 // Like Omarchy's own brightness keys: the icon and the level as a percentage.
 pub fn osd_level(pct: u8) {
     let pct = pct.to_string();
-    let _ = Command::new("omarchy").args(["osd", "-i", "brightness", "-p", &pct]).status();
+    let _ = run("omarchy", &["osd", "-i", "brightness", "-p", &pct]);
 }
 
 // ---- The touchpad helper ----
 
 // The privileged helper (zenbook-duo-screenpad-touchpad@<uid>.service) that
 // grabs the touchscreen and feeds a virtual touchpad. Only "on" and "off".
+pub const HELPER_NOT_RUNNING: &str = "the touchpad helper is not running";
+
 pub fn touchpad(command: &str) -> Result<(), String> {
     use std::io::{BufRead, BufReader, Write};
     let uid = unsafe { libc::getuid() };
     let path = format!("/run/zenbook-duo-screenpad-touchpad-{uid}/socket");
     let mut stream = std::os::unix::net::UnixStream::connect(&path)
-        .map_err(|_| "the touchpad helper is not running".to_string())?;
+        .map_err(|_| HELPER_NOT_RUNNING.to_string())?;
     let _ = stream.set_read_timeout(Some(Duration::from_secs(3)));
     stream.write_all(format!("{command}\n").as_bytes()).map_err(|e| e.to_string())?;
     let mut answer = String::new();
@@ -297,7 +314,7 @@ hl.dispatch(hl.dsp.focus({{ workspace = find("{main}").active_workspace.id }}))
 }
 
 pub fn osd_text(text: &str) {
-    let _ = Command::new("omarchy").args(["osd", "-m", text]).status();
+    let _ = run("omarchy", &["osd", "-m", text]);
 }
 
 #[cfg(test)]
@@ -310,6 +327,15 @@ mod tests {
         assert!(!out.ok);
         assert_eq!(out.stdout.trim(), "answer");
         assert_eq!(out.stderr.trim(), "why");
+    }
+
+    #[test]
+    fn run_does_not_wait_for_a_background_child() {
+        let started = Instant::now();
+        let out = run("sh", &["-c", "sleep 30 & echo done"]).unwrap();
+        assert!(out.ok);
+        assert_eq!(out.stdout.trim(), "done");
+        assert!(started.elapsed() < Duration::from_secs(1));
     }
 
     #[test]

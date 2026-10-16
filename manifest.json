@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.gillmania.zenbook-duo-screenpad",
   "name": "Zenbook Duo 14 ScreenPad",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "author": "Victor Gillholm",
   "license": "MIT",
   "description": "For the ASUS Zenbook Duo 14 (UX481/UX482) and its second screen, the ScreenPad Plus: the ScreenPad key cycles desktop, touchpad and off, the swap key throws windows between screens, and brightness follows focus.",

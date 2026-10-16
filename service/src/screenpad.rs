@@ -7,12 +7,16 @@
 use crate::state::{self, Mode};
 use crate::system::{self, Hold};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const DEFAULT_BRIGHTNESS: u8 = 50;
 // A touchpad only has to be seen: grey and dim, not read.
 const DEFAULT_TOUCHPAD_BRIGHTNESS: u8 = 15;
 const STEP: i16 = 5;
+// The start of every error that means there can be no touchpad now, as
+// opposed to one that went wrong on the way.
+const NO_TOUCHPAD: &str = "no touchpad: ";
+
 const OUTDATED: &str = "Display Setups is older than 0.8.0 and cannot hold the ScreenPad";
 
 fn default_brightness(mode: Mode) -> u8 {
@@ -49,8 +53,9 @@ impl ScreenPad {
     }
 
     // The ScreenPad key: off, desktop, touchpad, and off again.
-    // With a Display Setups too old to hold the ScreenPad, there is no
-    // touchpad, and the key goes from desktop straight to off.
+    // When there can be no touchpad (Display Setups too old to hold the
+    // ScreenPad, no touchpad helper, ...), the key goes from desktop straight
+    // to off, so it never gets stuck on the desktop.
     pub fn cycle(&mut self) -> Result<(), String> {
         let next = match self.mode {
             Mode::Off => Mode::Desktop,
@@ -58,15 +63,28 @@ impl ScreenPad {
             Mode::Touchpad => Mode::Off,
         };
         match self.set_mode(next) {
-            Err(e) if e == OUTDATED => self.set_mode(Mode::Off),
+            // Only when there can be no touchpad: any other failure (the
+            // brightness, saving the mode) is reported, not covered by off.
+            Err(e) if next == Mode::Touchpad && e.starts_with(NO_TOUCHPAD) => {
+                eprintln!("{e}, so off instead");
+                self.set_mode(Mode::Off)
+            }
             result => result,
         }
     }
 
     pub fn set_mode(&mut self, mode: Mode) -> Result<(), String> {
-        // Leaving a touchpad, the touchscreen is let go before anything else.
+        // Out of a touchpad, the touchscreen is let go before anything else,
+        // and on every change, whatever mode was saved: "off" is harmless to
+        // a helper holding nothing. A helper that is not running holds
+        // nothing either; one that fails to let go is reported once the mode
+        // has changed, so the key still works, and again on the next change.
+        let mut released = Ok(());
         if mode != Mode::Touchpad {
-            let _ = system::touchpad("off");
+            match system::touchpad("off") {
+                Err(e) if e != system::HELPER_NOT_RUNNING => released = Err(e),
+                _ => {}
+            }
         }
         let result = match mode {
             Mode::Off => self.go_off(),
@@ -78,7 +96,8 @@ impl ScreenPad {
             state::save_mode(mode).map_err(|e| format!("could not save the mode: {e}"))?;
         }
         system::tell_shell(self.mode.name());
-        result
+        result?;
+        released.map_err(|e| format!("the touchpad helper did not let go of the touchscreen: {e}"))
     }
 
     // The level the panel has now is kept for its mode, for next time. Only a
@@ -94,7 +113,8 @@ impl ScreenPad {
 
     fn light(mode: Mode) -> Result<(), String> {
         // Light last, once there is a picture to light.
-        for _ in 0..20 {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
             if system::pad().is_some_and(|p| p.enabled) {
                 break;
             }
@@ -193,12 +213,12 @@ impl ScreenPad {
             Hold::Refused(why) => {
                 undo_inputs();
                 system::osd_text("No touchpad now");
-                return Err(why);
+                return Err(format!("{NO_TOUCHPAD}{why}"));
             }
             Hold::Outdated => {
                 undo_inputs();
                 system::osd_text("Update Display Setups");
-                return Err(OUTDATED.into());
+                return Err(format!("{NO_TOUCHPAD}{OUTDATED}"));
             }
             Hold::Absent => {
                 if let Err(e) = Self::reserve() {
@@ -209,7 +229,7 @@ impl ScreenPad {
         }
         if let Err(e) = system::touchpad("on") {
             system::osd_text("Touchpad unavailable");
-            return self.fall_back(was, e);
+            return self.fall_back(was, format!("{NO_TOUCHPAD}{e}"));
         }
         Self::light(Mode::Touchpad)
     }
@@ -218,7 +238,7 @@ impl ScreenPad {
     // file hypr.lua reads, and the config reloaded as a touchpad puts it out
     // of the desktop. Done once it is far to the right of everything.
     fn reserve() -> Result<(), String> {
-        let pad = system::pad().ok_or("the ScreenPad is not connected")?;
+        let pad = system::pad().ok_or(format!("{NO_TOUCHPAD}the ScreenPad is not connected"))?;
         let ids: Vec<String> = system::workspace_owners()
             .into_iter()
             .filter(|(_, m)| *m == pad.name)
@@ -226,13 +246,14 @@ impl ScreenPad {
             .collect();
         state::save_reserved(&ids.join(" ")).map_err(|e| format!("could not save the workspaces: {e}"))?;
         Self::reload_as(Mode::Touchpad)?;
-        for _ in 0..20 {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
             if system::pad().is_some_and(|p| p.enabled && p.x >= 10000) {
                 return Ok(());
             }
             thread::sleep(Duration::from_millis(100));
         }
-        Err("the ScreenPad was not moved out of the desktop (is zenbook-duo-screenpad.lua loaded?)".into())
+        Err(format!("{NO_TOUCHPAD}the ScreenPad was not moved out of the desktop (is zenbook-duo-screenpad.lua loaded?)"))
     }
 
     // A touchpad that could not be made goes back to what it was, rather than

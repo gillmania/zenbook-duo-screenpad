@@ -58,14 +58,14 @@ jobs:
           pkg="zenbook-duo-screenpad-$VERSION-1-x86_64.pkg.tar.zst"
           sum=$(sha256sum "packaging/$pkg" | cut -d' ' -f1)
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag \
-            --title "Zenbook Duo 14 ScreenPad $VERSION" --notes "Install with (stop if sha256sum does not print OK):
+            --title "Zenbook Duo 14 ScreenPad $VERSION" --notes "Install with (pacman runs only if the checksum matches):
 
           \`\`\`
-          cd \"\$(mktemp -d)\"
-          curl -fLO https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/$pkg
-          echo \"$sum  $pkg\" | sha256sum -c -
+          cd \"\$(mktemp -d)\" &&
+          curl -fLO https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/$pkg &&
+          echo \"$sum  $pkg\" | sha256sum -c - &&
           sudo pacman -U ./$pkg
           \`\`\`
 
-          Then follow the steps it prints." \
+          Then, as your own user: zenbook-duo-screenpad-setup" \
             packaging/*.pkg.tar.zst packaging/SHA256SUMS

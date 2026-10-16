@@ -45,11 +45,19 @@ fn send(line: &str) -> ExitCode {
         eprintln!("zenbook-duo-screenpad: the service is not running ({})", path.display());
         return ExitCode::FAILURE;
     };
+    // A mode change can wait up to 35 s for Display Setups to start
+    // (system::hold), twice when a touchpad falls back to the desktop; a
+    // service that hangs longer must not hang the key binding or a setup
+    // script with it.
+    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(120)));
     if stream.write_all(format!("{line}\n").as_bytes()).is_err() {
         return ExitCode::FAILURE;
     }
     let mut answer = String::new();
-    let _ = BufReader::new(&stream).read_line(&mut answer);
+    if BufReader::new(&stream).read_line(&mut answer).is_err() {
+        eprintln!("zenbook-duo-screenpad: no answer within 120 s; the service may still finish ({line})");
+        return ExitCode::FAILURE;
+    }
     let answer = answer.trim();
     println!("{answer}");
     if answer.starts_with("error:") || answer.is_empty() {

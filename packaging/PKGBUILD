@@ -3,7 +3,7 @@
 # The service and the touchpad helper. The shell plugin that draws the
 # touchpad surface is installed from the Omarchy plugin marketplace.
 pkgname=zenbook-duo-screenpad
-pkgver=0.1.1
+pkgver=0.1.2
 pkgrel=1
 pkgdesc="ScreenPad Plus on the ASUS Zenbook Duo 14 under Omarchy: desktop, touchpad and off on its own key, window swap, brightness"
 arch=('x86_64')
@@ -39,6 +39,7 @@ package() {
 	cd "$pkgname-$pkgver"
 	install -Dm755 service/target/release/zenbook-duo-screenpad -t "$pkgdir/usr/bin"
 	install -Dm755 service/target/release/zenbook-duo-screenpad-touchpad -t "$pkgdir/usr/bin"
+	install -Dm755 packaging/zenbook-duo-screenpad-setup -t "$pkgdir/usr/bin"
 
 	# The units in the repo point at a source install; packaged, both live in /usr/bin.
 	sed 's|%h/.local/bin/|/usr/bin/|' systemd/zenbook-duo-screenpad.service \
