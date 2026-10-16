@@ -7,7 +7,7 @@
 use crate::state::{self, Mode};
 use crate::system::{self, Hold};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const DEFAULT_BRIGHTNESS: u8 = 50;
 // A touchpad only has to be seen: grey and dim, not read.
@@ -113,7 +113,8 @@ impl ScreenPad {
 
     fn light(mode: Mode) -> Result<(), String> {
         // Light last, once there is a picture to light.
-        for _ in 0..20 {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
             if system::pad().is_some_and(|p| p.enabled) {
                 break;
             }
@@ -222,7 +223,7 @@ impl ScreenPad {
             Hold::Absent => {
                 if let Err(e) = Self::reserve() {
                     system::osd_text("No touchpad now");
-                    return self.fall_back(was, format!("{NO_TOUCHPAD}{e}"));
+                    return self.fall_back(was, e);
                 }
             }
         }
@@ -237,7 +238,7 @@ impl ScreenPad {
     // file hypr.lua reads, and the config reloaded as a touchpad puts it out
     // of the desktop. Done once it is far to the right of everything.
     fn reserve() -> Result<(), String> {
-        let pad = system::pad().ok_or("the ScreenPad is not connected")?;
+        let pad = system::pad().ok_or(format!("{NO_TOUCHPAD}the ScreenPad is not connected"))?;
         let ids: Vec<String> = system::workspace_owners()
             .into_iter()
             .filter(|(_, m)| *m == pad.name)
@@ -245,13 +246,14 @@ impl ScreenPad {
             .collect();
         state::save_reserved(&ids.join(" ")).map_err(|e| format!("could not save the workspaces: {e}"))?;
         Self::reload_as(Mode::Touchpad)?;
-        for _ in 0..20 {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
             if system::pad().is_some_and(|p| p.enabled && p.x >= 10000) {
                 return Ok(());
             }
             thread::sleep(Duration::from_millis(100));
         }
-        Err("the ScreenPad was not moved out of the desktop (is zenbook-duo-screenpad.lua loaded?)".into())
+        Err(format!("{NO_TOUCHPAD}the ScreenPad was not moved out of the desktop (is zenbook-duo-screenpad.lua loaded?)"))
     }
 
     // A touchpad that could not be made goes back to what it was, rather than

@@ -54,7 +54,10 @@ fn send(line: &str) -> ExitCode {
         return ExitCode::FAILURE;
     }
     let mut answer = String::new();
-    let _ = BufReader::new(&stream).read_line(&mut answer);
+    if BufReader::new(&stream).read_line(&mut answer).is_err() {
+        eprintln!("zenbook-duo-screenpad: no answer within 120 s; the service may still finish ({line})");
+        return ExitCode::FAILURE;
+    }
     let answer = answer.trim();
     println!("{answer}");
     if answer.starts_with("error:") || answer.is_empty() {

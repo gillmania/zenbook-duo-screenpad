@@ -239,7 +239,7 @@ pub fn main_brightness(step: &str) {
 // Like Omarchy's own brightness keys: the icon and the level as a percentage.
 pub fn osd_level(pct: u8) {
     let pct = pct.to_string();
-    let _ = Command::new("omarchy").args(["osd", "-i", "brightness", "-p", &pct]).status();
+    let _ = run("omarchy", &["osd", "-i", "brightness", "-p", &pct]);
 }
 
 // ---- The touchpad helper ----
@@ -301,7 +301,7 @@ hl.dispatch(hl.dsp.focus({{ workspace = find("{main}").active_workspace.id }}))
 }
 
 pub fn osd_text(text: &str) {
-    let _ = Command::new("omarchy").args(["osd", "-m", text]).status();
+    let _ = run("omarchy", &["osd", "-m", text]);
 }
 
 #[cfg(test)]
