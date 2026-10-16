@@ -45,6 +45,9 @@ fn send(line: &str) -> ExitCode {
         eprintln!("zenbook-duo-screenpad: the service is not running ({})", path.display());
         return ExitCode::FAILURE;
     };
+    // A mode change takes a few seconds at most; a service that hangs must
+    // not hang the key binding or a setup script with it.
+    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(15)));
     if stream.write_all(format!("{line}\n").as_bytes()).is_err() {
         return ExitCode::FAILURE;
     }

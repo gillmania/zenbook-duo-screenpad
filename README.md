@@ -60,29 +60,33 @@ use it, use 0.8.0 or later.
 
 Download the package, check it against the SHA-256 below, and install that
 file. A release can be replaced after the fact; the checksum written here
-cannot, so a package that does not match is never installed.
+cannot. The commands are joined with `&&`, so pacman never runs when the
+check fails:
 
 ```bash
-cd "$(mktemp -d)"
-curl -fLO https://github.com/gillmania/zenbook-duo-screenpad/releases/download/v0.1.2/zenbook-duo-screenpad-0.1.2-1-x86_64.pkg.tar.zst
-echo "SHA256-OF-THE-v0.1.2-PACKAGE  zenbook-duo-screenpad-0.1.2-1-x86_64.pkg.tar.zst" | sha256sum -c -
+cd "$(mktemp -d)" &&
+curl -fLO https://github.com/gillmania/zenbook-duo-screenpad/releases/download/v0.1.2/zenbook-duo-screenpad-0.1.2-1-x86_64.pkg.tar.zst &&
+echo "<the v0.1.2 checksum, written here once it is released>  zenbook-duo-screenpad-0.1.2-1-x86_64.pkg.tar.zst" | sha256sum -c - &&
 sudo pacman -U ./zenbook-duo-screenpad-0.1.2-1-x86_64.pkg.tar.zst
 ```
 
-Run the lines one at a time, and stop if `sha256sum` does not print `OK`.
-
-Then finish the setup as your own user, not with sudo:
+Then finish the setup as your own user, in your Hyprland session (not with
+sudo):
 
 ```bash
 zenbook-duo-screenpad-setup
 ```
 
-It checks that this is a UX482 and that `asusd` is running, and asks before
-each step: it enables the touchpad helper (your password, once), starts the
-service, adds one line to the end of `~/.config/hypr/hyprland.lua` that loads
-the key bindings (after a backup), and adds the shell plugin that draws the
-touchpad surface with `omarchy plugin add`. Run it again at any time; what is
-done already is left alone. `--yes` answers every question with yes.
+It checks that this is a UX481/UX482 and that no install from source is left,
+then asks before each step: enabling the touchpad helper (your password, once),
+starting the service, adding one line to the end of
+`~/.config/hypr/hyprland.lua` that loads the key bindings (after a backup), and
+adding the shell plugin that draws the touchpad surface. The plugin comes from
+`omarchy plugin add`, which clones this repository's current `main`, not a
+pinned commit. Run it again at any time: what is done already is left alone,
+and it exits with an error naming any step that did not complete. Without a
+terminal (an AI agent, say) it needs `--yes`, which agrees to every step; the
+password is then asked for in a dialog.
 
 ### From source
 

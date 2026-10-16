@@ -49,8 +49,9 @@ impl ScreenPad {
     }
 
     // The ScreenPad key: off, desktop, touchpad, and off again.
-    // With a Display Setups too old to hold the ScreenPad, there is no
-    // touchpad, and the key goes from desktop straight to off.
+    // When there can be no touchpad (Display Setups too old to hold the
+    // ScreenPad, no touchpad helper, ...), the key goes from desktop straight
+    // to off, so it never gets stuck on the desktop.
     pub fn cycle(&mut self) -> Result<(), String> {
         let next = match self.mode {
             Mode::Off => Mode::Desktop,
@@ -58,7 +59,10 @@ impl ScreenPad {
             Mode::Touchpad => Mode::Off,
         };
         match self.set_mode(next) {
-            Err(e) if e == OUTDATED => self.set_mode(Mode::Off),
+            Err(e) if next == Mode::Touchpad => {
+                eprintln!("no touchpad ({e}), so off instead");
+                self.set_mode(Mode::Off)
+            }
             result => result,
         }
     }

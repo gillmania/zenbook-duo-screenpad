@@ -15,5 +15,7 @@ post_upgrade() {
 pre_remove() {
 	echo "==> zenbook-duo-screenpad: if you have not run 'zenbook-duo-screenpad-setup --remove',"
 	echo "    remove the hyprland.lua line and the shell plugin yourself, and run"
+	echo "    systemctl --user disable --now zenbook-duo-screenpad.service"
+	echo "    sudo systemctl disable --now zenbook-duo-screenpad-touchpad@\$(id -u).service"
 	echo "    omarchy-shell display-setups unhold \"desc:BOE 0x0921\" \"ScreenPad key\""
 }
