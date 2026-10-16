@@ -13,6 +13,10 @@ const DEFAULT_BRIGHTNESS: u8 = 50;
 // A touchpad only has to be seen: grey and dim, not read.
 const DEFAULT_TOUCHPAD_BRIGHTNESS: u8 = 15;
 const STEP: i16 = 5;
+// The start of every error that means there can be no touchpad now, as
+// opposed to one that went wrong on the way.
+const NO_TOUCHPAD: &str = "no touchpad: ";
+
 const OUTDATED: &str = "Display Setups is older than 0.8.0 and cannot hold the ScreenPad";
 
 fn default_brightness(mode: Mode) -> u8 {
@@ -59,10 +63,10 @@ impl ScreenPad {
             Mode::Touchpad => Mode::Off,
         };
         match self.set_mode(next) {
-            // Only when the touchpad never came: a later failure (saving
-            // the mode, say) is reported, not covered by switching off.
-            Err(e) if next == Mode::Touchpad && self.mode != Mode::Touchpad => {
-                eprintln!("no touchpad ({e}), so off instead");
+            // Only when there can be no touchpad: any other failure (the
+            // brightness, saving the mode) is reported, not covered by off.
+            Err(e) if next == Mode::Touchpad && e.starts_with(NO_TOUCHPAD) => {
+                eprintln!("{e}, so off instead");
                 self.set_mode(Mode::Off)
             }
             result => result,
@@ -70,13 +74,15 @@ impl ScreenPad {
     }
 
     pub fn set_mode(&mut self, mode: Mode) -> Result<(), String> {
-        // Leaving a touchpad, the touchscreen is let go before anything else.
-        // A helper that is not running holds nothing; one that fails to let
-        // go is reported once the mode has changed, so the key still works.
+        // Out of a touchpad, the touchscreen is let go before anything else,
+        // and on every change, whatever mode was saved: "off" is harmless to
+        // a helper holding nothing. A helper that is not running holds
+        // nothing either; one that fails to let go is reported once the mode
+        // has changed, so the key still works, and again on the next change.
         let mut released = Ok(());
         if mode != Mode::Touchpad {
             match system::touchpad("off") {
-                Err(e) if self.mode == Mode::Touchpad && e != system::HELPER_NOT_RUNNING => released = Err(e),
+                Err(e) if e != system::HELPER_NOT_RUNNING => released = Err(e),
                 _ => {}
             }
         }
@@ -206,23 +212,23 @@ impl ScreenPad {
             Hold::Refused(why) => {
                 undo_inputs();
                 system::osd_text("No touchpad now");
-                return Err(why);
+                return Err(format!("{NO_TOUCHPAD}{why}"));
             }
             Hold::Outdated => {
                 undo_inputs();
                 system::osd_text("Update Display Setups");
-                return Err(OUTDATED.into());
+                return Err(format!("{NO_TOUCHPAD}{OUTDATED}"));
             }
             Hold::Absent => {
                 if let Err(e) = Self::reserve() {
                     system::osd_text("No touchpad now");
-                    return self.fall_back(was, e);
+                    return self.fall_back(was, format!("{NO_TOUCHPAD}{e}"));
                 }
             }
         }
         if let Err(e) = system::touchpad("on") {
             system::osd_text("Touchpad unavailable");
-            return self.fall_back(was, e);
+            return self.fall_back(was, format!("{NO_TOUCHPAD}{e}"));
         }
         Self::light(Mode::Touchpad)
     }

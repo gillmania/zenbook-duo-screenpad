@@ -163,9 +163,11 @@ fn display_setups(args: &[&str]) -> Hold {
 
 // At login this service can start before the shell has read its holds;
 // Display Setups then says so, and is asked again for up to half a minute
-// rather than taken for a refusal.
+// rather than taken for a refusal (plus one last command, at most
+// COMMAND_TIMEOUT; the client's limit in main.rs covers two of these).
 pub fn hold(state: &str) -> Hold {
-    for _ in 0..30 {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while Instant::now() < deadline {
         match display_setups(&["hold", PAD_SELECTOR, state, OWNER]) {
             Hold::Refused(why) if why.contains("still starting") => thread::sleep(Duration::from_secs(1)),
             answer => return answer,

@@ -87,8 +87,11 @@ conf_with_line() {
 	printf '%s\n' "$line"
 }
 
+# 0 when hyprland.lua has the line, 1 when it does not (or there is no
+# file), 2 when it cannot be read.
 has_line() {
-	[[ -f $conf ]] && grep -qxF "$line" "$conf"
+	[[ -f $conf ]] || return 1
+	grep -qxF "$line" "$conf" || return $(($? == 1 ? 1 : 2))
 }
 
 # The shell plugin's state: enabled, disabled or absent. Fails when Omarchy
@@ -137,14 +140,23 @@ if $remove; then
 			exit 1
 		}
 	elif systemctl is-active --quiet "$helper_unit"; then
-		echo "Note: the service is not running, so the helper may still hold the touchscreen"
-		echo "until it is stopped below."
+		# Without the service only stopping the helper lets go for certain.
+		echo "The service is not running, so the touchpad helper is stopped first."
+		if ! ask "Stop and disable the touchpad helper (needs your password)?" ||
+			! as_root systemctl disable --now "$helper_unit"; then
+			echo "The helper is still running; nothing was removed." >&2
+			exit 1
+		fi
 	fi
 	if command -v omarchy-shell >/dev/null; then
 		out=$(omarchy-shell display-setups unhold "desc:BOE 0x0921" "ScreenPad key" 2>&1) ||
 			[[ $out == *"Target not found"* ]] || fail "releasing the hold in Display Setups ($out)"
 	fi
-	if has_line && ask "Remove the line that loads the key bindings from $conf?"; then
+	rc=0
+	has_line || rc=$?
+	if ((rc == 2)); then
+		fail "reading $conf"
+	elif ((rc == 0)) && ask "Remove the line that loads the key bindings from $conf?"; then
 		replace_conf conf_without_line || fail "removing the line from $conf"
 	fi
 	if systemctl --user is-enabled --quiet "$user_unit" 2>/dev/null || systemctl --user is-active --quiet "$user_unit"; then
@@ -234,7 +246,11 @@ else
 fi
 
 echo
-if has_line; then
+rc=0
+has_line || rc=$?
+if ((rc == 2)); then
+	fail "reading $conf"
+elif ((rc == 0)); then
 	echo "Key bindings: already loaded from $conf."
 else
 	echo "To bind its keys and keep the ScreenPad off across config reloads, this line"
