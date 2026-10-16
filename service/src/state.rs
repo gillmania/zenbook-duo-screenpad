@@ -82,3 +82,20 @@ pub fn load_brightness(mode: Mode) -> Option<u8> {
 pub fn save_brightness(mode: Mode, pct: u8) -> io::Result<()> {
     write_atomic(&brightness_path(mode), &format!("{pct}\n"))
 }
+
+// The workspaces the service sent away from a ScreenPad it reserved itself,
+// without Display Setups. Read by hypr.lua after a config reload.
+fn reserved_path() -> PathBuf {
+    dir().join("reserved")
+}
+
+pub fn save_reserved(ids: &str) -> io::Result<()> {
+    write_atomic(&reserved_path(), &format!("{}\n", ids.trim()))
+}
+
+// The reservation, if there was one; it is gone afterwards.
+pub fn take_reserved() -> Option<String> {
+    let ids = fs::read_to_string(reserved_path()).ok()?;
+    fs::remove_file(reserved_path()).ok()?;
+    Some(ids)
+}

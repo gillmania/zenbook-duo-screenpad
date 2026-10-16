@@ -3,8 +3,6 @@
 The second screen of the ASUS Zenbook Duo 14 (UX481/UX482), the ScreenPad
 Plus, under [Omarchy](https://omarchy.org/). Tested on a UX482EG.
 
-> Plans, decisions and measurements: [PLAN.md](PLAN.md) (in Swedish).
-
 ## What it does
 
 | Key | Does |
@@ -18,7 +16,8 @@ Plus, under [Omarchy](https://omarchy.org/). Tested on a UX482EG.
 **Off** really is off: the panel goes dark first, then Hyprland stops using it,
 its workspaces move to the laptop's own screen, and its touchscreen and pen are
 switched off so a touch on the dark panel does nothing. **On** brings it back
-with the brightness it had. The mode survives a restart.
+with the brightness it had. Off and desktop survive a restart; a touchpad
+comes back as a desktop.
 
 **Touchpad** turns the ScreenPad into a large touchpad: a dim grey surface
 with a honeycomb texture and the Omarchy logo, in the colours of your theme.
@@ -45,19 +44,22 @@ when it is installed, and from your own Hyprland rules otherwise.
   the ScreenPad is an internal panel named `DP-1`, Omarchy takes it for an
   external screen and tries DDC/CI, which it never answers. Its brightness goes
   through `asusctl`, which owns the device and keeps the level across reboots.
-- **Display Setups** would switch the ScreenPad back on by its profile. The
-  service holds the display instead (Display Setups 0.8.0 and later), so the
-  key always wins.
+- **[Display Setups](https://github.com/gillmania/omarchy-display-setups)**,
+  if you use it, would switch the ScreenPad back on by its profile. The service
+  asks it to hold the display instead (Display Setups 0.8.0 and later), so the
+  key always wins. Older versions cannot hold it: the touchpad mode is then
+  left out and the key goes from desktop straight to off, with a reminder to
+  update.
 
 ## Install
 
-Needs `asusctl` with `asusd` running, and Display Setups 0.8.0 or later for
-the touchpad mode.
+Needs `asusctl` with `asusd` running. Display Setups is not needed; if you
+use it, use 0.8.0 or later.
 
 ### From a release
 
 ```bash
-sudo pacman -U https://github.com/gillmania/zenbook-duo-screenpad/releases/download/v0.1.0/zenbook-duo-screenpad-0.1.0-1-x86_64.pkg.tar.zst
+sudo pacman -U https://github.com/gillmania/zenbook-duo-screenpad/releases/download/v0.1.1/zenbook-duo-screenpad-0.1.1-1-x86_64.pkg.tar.zst
 ```
 
 pacman then prints three steps to finish, as your own user: start the
@@ -133,11 +135,16 @@ and a command can never step on each other.
 - The mode and the ScreenPad's last brightness are kept in
   `~/.local/state/zenbook-duo-screenpad/`, written atomically.
 - `hypr/zenbook-duo-screenpad.lua` binds the keys and, at every config load,
-  switches the ScreenPad and its touch input off if the mode is off. A reload
-  from anywhere therefore cannot light it up, even before the service or the
-  shell is running.
-- Without Display Setups, the service switches the ScreenPad on and off in
-  Hyprland directly.
+  puts the saved mode back: off switches the ScreenPad and its touch input
+  off, and a touchpad keeps its touches away from the desktop. A reload from
+  anywhere therefore cannot light it up, even before the service or the shell
+  is running.
+- With Display Setups, the service asks it to hold the ScreenPad on, off or
+  reserved (out of the desktop). Without it, Hyprland's own config does the
+  work: the service saves the new mode and reloads the config, so the
+  ScreenPad comes back with your own monitor and workspace rules. For a
+  touchpad, the Lua file then moves it far to the right of the desktop, where
+  no pointer reaches, and sends its workspaces to the laptop's screen.
 - **The touchpad helper** (`zenbook-duo-screenpad-touchpad@<uid>.service`) is
   the only part that runs as root, because only root may open `/dev/uinput`
   and grab the touchscreen. It does nothing else: it creates one fixed device,
