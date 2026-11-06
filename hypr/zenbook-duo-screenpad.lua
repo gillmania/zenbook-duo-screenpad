@@ -87,6 +87,25 @@ local function reserve()
 	if not pad then return end
 	if not main then error("no other screen to take the ScreenPad's workspaces") end
 
+	-- The other screens keep their places: with positions left to "auto",
+	-- Hyprland would otherwise rearrange them around the moved ScreenPad.
+	for _, m in ipairs(others) do place(m, m.x .. "x" .. m.y) end
+	place(pad, math.floor(right + 10000) .. "x" .. top)
+
+	-- Omarchy 4.5 and later keep workspaces per monitor and renumber them
+	-- themselves: the ScreenPad's go to the main screen without rules, and
+	-- Omarchy makes them the main screen's own.
+	if o and o.workspaces and o.workspaces.reconcile then
+		for _, ws in ipairs(hl.get_workspaces()) do
+			if not ws.special and ws.id > 0 and ws.monitor and ws.monitor.name == pad.name then
+				hl.dispatch(hl.dsp.workspace.move({ workspace = ws.id, monitor = main.name }))
+			end
+		end
+		o.workspaces.reconcile()
+		hl.dispatch(hl.dsp.focus({ monitor = main.name }))
+		return
+	end
+
 	-- Workspaces on the ScreenPad now go too, not only those it owns.
 	local seen = {}
 	for _, id in ipairs(ids) do seen[id] = true end
@@ -97,10 +116,6 @@ local function reserve()
 		end
 	end
 
-	-- The other screens keep their places: with positions left to "auto",
-	-- Hyprland would otherwise rearrange them around the moved ScreenPad.
-	for _, m in ipairs(others) do place(m, m.x .. "x" .. m.y) end
-	place(pad, math.floor(right + 10000) .. "x" .. top)
 	for _, id in ipairs(ids) do
 		hl.workspace_rule({ workspace = tostring(id), monitor = main.name })
 		if hl.get_workspace(id) then
@@ -118,10 +133,12 @@ end)
 -- The ScreenPad key and the swap key never reach Hyprland (the service reads
 -- them from the kernel log), so only the keyboard stand-ins are bound here.
 o.bind("SUPER + ALT + P", "ScreenPad mode", bin .. " cycle")
-o.bind("SUPER + ALT + O", "ScreenPad brightness up", bin .. " brightness up")
-o.bind("SUPER + ALT + L", "ScreenPad brightness down", bin .. " brightness down")
+-- U and J: Omarchy 4.5 took SUPER + ALT + L for cycling the workspace layout
+-- back, and K is taken too.
+o.bind("SUPER + ALT + U", "ScreenPad brightness up", bin .. " brightness up")
+o.bind("SUPER + ALT + J", "ScreenPad brightness down", bin .. " brightness down")
 -- The Fn brightness keys come from a separate device that handles modifiers
--- unevenly (with SUPER+ALT held, up fires and down does not), so O/L above
+-- unevenly (with SUPER+ALT held, up fires and down does not), so U/J above
 -- are the dependable pair.
 o.bind("SUPER + ALT + XF86MonBrightnessUp", "ScreenPad brightness up (Fn)", bin .. " brightness up")
 o.bind("SUPER + ALT + XF86MonBrightnessDown", "ScreenPad brightness down (Fn)", bin .. " brightness down")
