@@ -334,7 +334,9 @@ pub mod tests {
     // The generated Lua has to parse, or Hyprland runs none of it. Skipped
     // where no Lua compiler is installed.
     pub fn assert_lua_parses(lua: &str) {
-        let path = std::env::temp_dir().join(format!("zenbook-duo-screenpad-test-{}.lua", std::process::id()));
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!("zenbook-duo-screenpad-test-{}-{n}.lua", std::process::id()));
         std::fs::write(&path, lua).unwrap();
         let checked = std::process::Command::new("luac").arg("-p").arg(&path).output();
         let _ = std::fs::remove_file(&path);

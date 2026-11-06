@@ -382,13 +382,15 @@ local function count(ws)
 end
 
 local src = here.active_workspace
+-- Read now: once emptied and out of view, Hyprland drops the workspace.
+local src_id = src.id
 if count(src) == 0 then
 	hl.dispatch(hl.dsp.focus({{ workspace = there.active_workspace.id }}))
 	return
 end
 
 local w = hl.get_active_window()
-if not (w and w.workspace and w.workspace.id == src.id) then return end
+if not (w and w.workspace and w.workspace.id == src_id) then return end
 
 local target = there.active_workspace.id
 local ids = {{ {main_ids} }}
@@ -402,14 +404,23 @@ if up then
 	end
 end
 
-hl.dispatch(hl.dsp.window.move({{ window = w, workspace = target, follow = false }}))
+-- A workspace that does not exist yet is made on the screen in focus. Without
+-- rules that pin it (Omarchy 4.5 has none), it is made on the main screen
+-- first, so it does not turn up on the ScreenPad.
+if up and not hl.get_workspace(target) then
+	hl.dispatch(hl.dsp.focus({{ monitor = main.name }}))
+	hl.dispatch(hl.dsp.focus({{ workspace = tostring(target) }}))
+	hl.dispatch(hl.dsp.focus({{ monitor = pad.name }}))
+end
+
+hl.dispatch(hl.dsp.window.move({{ window = w, workspace = tostring(target), follow = false }}))
 
 -- Going up, the main screen has to show the target for the window to be seen.
 -- Emptying this screen leaves keyboard focus on the thrown window while
 -- Hyprland still calls this workspace active; the round trip settles it.
-if up or count(hl.get_workspace(src.id)) == 0 then
-	hl.dispatch(hl.dsp.focus({{ workspace = target }}))
-	hl.dispatch(hl.dsp.focus({{ workspace = src.id }}))
+if up or count(hl.get_workspace(src_id)) == 0 then
+	hl.dispatch(hl.dsp.focus({{ workspace = tostring(target) }}))
+	hl.dispatch(hl.dsp.focus({{ workspace = tostring(src_id) }}))
 end
 "#
     )
