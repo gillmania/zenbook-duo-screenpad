@@ -67,9 +67,9 @@ check fails:
 
 ```bash
 cd "$(mktemp -d)" &&
-curl -fLO https://github.com/gillmania/zenbook-duo-screenpad/releases/download/v0.1.2/zenbook-duo-screenpad-0.1.2-1-x86_64.pkg.tar.zst &&
-echo "6d11e297fcf7ffeee9711b4c29850f3ee6c36958fc9a8b2cba6a24fa7553ece3  zenbook-duo-screenpad-0.1.2-1-x86_64.pkg.tar.zst" | sha256sum -c - &&
-sudo pacman -U ./zenbook-duo-screenpad-0.1.2-1-x86_64.pkg.tar.zst
+curl -fLO https://github.com/gillmania/zenbook-duo-screenpad/releases/download/v0.1.3/zenbook-duo-screenpad-0.1.3-1-x86_64.pkg.tar.zst &&
+echo "6aea049d248e7ec39a484e4d5ba00c2c406b6f3b206e55c20b92722fe06742e8  zenbook-duo-screenpad-0.1.3-1-x86_64.pkg.tar.zst" | sha256sum -c - &&
+sudo pacman -U ./zenbook-duo-screenpad-0.1.3-1-x86_64.pkg.tar.zst
 ```
 
 Then finish the setup as your own user, in your Hyprland session (not with
