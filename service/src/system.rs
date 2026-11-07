@@ -288,14 +288,22 @@ pub fn tell_shell(mode: &str) {
 
 // Back from a touchpad: the ScreenPad shows the technical workspace Hyprland
 // gave it, and focus may have followed a workspace down to it. Show its own
-// first workspace again, then put focus back on the main screen.
+// first workspace again, then put focus back on the main screen. With Omarchy
+// 4.5 and later that workspace is the first of the ScreenPad's own ten.
 pub fn settle_focus(main: &str, pad: &str, pad_ids: &[u32]) -> Result<(), String> {
+    match settle_focus_lua(main, pad, pad_ids) {
+        Some(lua) => hypr_eval(&lua),
+        None => Ok(()),
+    }
+}
+
+fn settle_focus_lua(main: &str, pad: &str, pad_ids: &[u32]) -> Option<String> {
     let safe = |s: &str| s.chars().all(|c| c.is_ascii_alphanumeric() || "._-".contains(c));
     if !safe(main) || !safe(pad) {
-        return Ok(());
+        return None;
     }
     let first = pad_ids.first().copied().unwrap_or(0);
-    hypr_eval(&format!(
+    Some(format!(
         r#"
 local function find(name)
 	for _, m in ipairs(hl.get_monitors()) do
@@ -304,8 +312,10 @@ local function find(name)
 end
 local pad = find("{pad}")
 if not (pad and find("{main}")) then return end
-if {first} > 0 and pad.active_workspace.id ~= {first} then
-	hl.dispatch(hl.dsp.focus({{ workspace = {first} }}))
+local first = {first}
+if o and o.workspaces and o.workspaces.workspace_id then first = o.workspaces.workspace_id(pad, 1) end
+if first > 0 and pad.active_workspace.id ~= first then
+	hl.dispatch(hl.dsp.focus({{ workspace = first }}))
 end
 -- Read again: the workspace the main screen showed may have gone back down.
 hl.dispatch(hl.dsp.focus({{ workspace = find("{main}").active_workspace.id }}))
@@ -318,8 +328,29 @@ pub fn osd_text(text: &str) {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
+
+    // The generated Lua has to parse, or Hyprland runs none of it. Skipped
+    // where no Lua compiler is installed.
+    pub fn assert_lua_parses(lua: &str) {
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!("zenbook-duo-screenpad-test-{}-{n}.lua", std::process::id()));
+        std::fs::write(&path, lua).unwrap();
+        let checked = std::process::Command::new("luac").arg("-p").arg(&path).output();
+        let _ = std::fs::remove_file(&path);
+        if let Ok(out) = checked {
+            assert!(out.status.success(), "{}\n{lua}", String::from_utf8_lossy(&out.stderr));
+        }
+    }
+
+    #[test]
+    fn settle_focus_lua_parses() {
+        assert_lua_parses(&settle_focus_lua("eDP-1", "DP-1", &[9, 10]).unwrap());
+        assert_lua_parses(&settle_focus_lua("eDP-1", "DP-1", &[]).unwrap());
+        assert!(settle_focus_lua("eDP-1\"", "DP-1", &[]).is_none());
+    }
 
     #[test]
     fn run_reads_both_pipes() {

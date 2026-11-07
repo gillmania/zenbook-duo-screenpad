@@ -11,7 +11,7 @@ Plus, under [Omarchy](https://omarchy.org/). Tested on a UX482EG.
 | Swap key (left of it) | Throws the focused window to the other screen, keeping focus where it was |
 | Sun keys | Brightness of the screen in focus, the ScreenPad included |
 | `SUPER + ALT + P` | Same as the ScreenPad key |
-| `SUPER + ALT + O` / `L` | ScreenPad brightness up / down |
+| `SUPER + ALT + U` / `J` | ScreenPad brightness up / down |
 
 **Off** really is off: the panel goes dark first, then Hyprland stops using it,
 its workspaces move to the laptop's own screen, and its touchscreen and pen are
@@ -28,9 +28,11 @@ The touchpad keeps a brightness of its own, lower than the desktop's.
 
 The swap key works between two desktops only. Throwing a window down puts it on
 the workspace the ScreenPad shows; throwing it up puts it on the lowest empty
-workspace that belongs to the laptop's screen. Which workspaces belong where is
-taken from [Display Setups](https://github.com/gillmania/omarchy-display-setups)
-when it is installed, and from your own Hyprland rules otherwise.
+workspace that belongs to the laptop's screen. On Omarchy 4.5 and later every
+screen has workspaces of its own, and those are the laptop's. On Omarchy 4.0
+which workspaces belong where is taken from
+[Display Setups](https://github.com/gillmania/omarchy-display-setups) when it
+is installed, and from your own Hyprland rules otherwise.
 
 ## Why it is needed
 
@@ -54,7 +56,7 @@ when it is installed, and from your own Hyprland rules otherwise.
 ## Install
 
 Needs `asusctl` with `asusd` running. Display Setups is not needed; if you
-use it, use 0.8.0 or later.
+use it, use 0.8.0 or later, and 0.9.0 or later on Omarchy 4.5.
 
 ### From a release
 
